@@ -5,7 +5,7 @@ import jwt
 import datetime
 import os
 
-DB_URI = os.environ('DB_URI')
+DB_URI = os.environ.get('DB_URI')
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = DB_URI
