@@ -1,11 +1,11 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 import jwt
 import datetime
 import os
 
-DB_URI = os.environ('DB_URI')
+DB_URI = os.environ.get('DB_URI')  # Cambia esto para obtener la variable de entorno
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = DB_URI
@@ -28,6 +28,20 @@ def generate_jwt():
 
 @app.route('/get_view_full_route_stop_event_info', methods=['GET'])
 def get_view_full_route_stop_event_info():
+    # Verificar si el JWT está presente en los encabezados de la solicitud
+    token = request.headers.get('Authorization')
+
+    if not token:
+        return jsonify({'message': 'Token no proporcionado'}), 401
+
+    try:
+        # Decodificar el JWT
+        jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+    except jwt.ExpiredSignatureError:
+        return jsonify({'message': 'Token ha expirado'}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({'message': 'Token inválido'}), 401
+
     # Ejecutar la consulta SQL directamente
     sql_query = text('SELECT * FROM view_full_route_stop_event_info')
 
@@ -43,10 +57,8 @@ def get_view_full_route_stop_event_info():
                 'ruta': {
                     'id': route_id,
                     'nombre': row.route_name,
-                    'primera_hora_corrida': row.first_departure_time.strftime(
-                        "%H:%M:%S") if row.first_departure_time else None,
-                    'ultima_hora_corrida': row.last_departure_time.strftime(
-                        "%H:%M:%S") if row.last_departure_time else None,
+                    'primera_hora_corrida': row.first_departure_time.strftime("%H:%M:%S") if row.first_departure_time else None,
+                    'ultima_hora_corrida': row.last_departure_time.strftime("%H:%M:%S") if row.last_departure_time else None,
                     'tipo_vehiculo': row.vehicle_type,
                     'frecuencia_paso': row.passing_frequency,
                     'color': row.route_color
