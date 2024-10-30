@@ -1,11 +1,11 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import text
 import jwt
 import datetime
 import os
 
-DB_URI = os.environ.get('DB_URI')
+DB_URI = os.environ.get('DB_URI')  # Cambia esto para obtener la variable de entorno
 
 app = Flask(__name__)
 app.config["SQLALCHEMY_DATABASE_URI"] = DB_URI
@@ -18,7 +18,7 @@ db = SQLAlchemy(app)
 @app.route('/generate_jwt', methods=['GET'])
 def generate_jwt():
     payload = {
-        'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=30)
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=1)
     }
 
     token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
@@ -28,63 +28,65 @@ def generate_jwt():
 
 @app.route('/get_view_full_route_stop_event_info', methods=['GET'])
 def get_view_full_route_stop_event_info():
-    # Ejecutar la consulta SQL directamente para obtener todos los registros, incluidos los duplicados
-    sql_query = text("""
-        SELECT 
-            ir.id_rote AS route_id,
-            ir.name_rote AS route_name,
-            ir.first_departure_time,
-            ir.last_departure_time,
-            ir.type_vehicle AS vehicle_type,
-            NULL::text AS passing_frequency,
-            ir.color_rote AS route_color,
-            is1.id_stops AS stop_id,
-            is1.name_stop AS stop_name,
-            is1.location_coordinates,
-            is1.district,
-            e.id_event AS event_id,
-            e.name_event AS event_name,
-            e.date_event AS event_date,
-            e.start_event_time AS event_start_time,
-            e.end_event_time AS event_end_time,
-            e.status AS event_status,
-            trs.follow_up
-        FROM 
-            ((((information_routes ir
-            JOIN table_route_stop trs ON ((ir.id_rote = trs.fk_id_name_route)))
-            JOIN information_stop is1 ON ((trs.fk_id_name_stops = is1.id_stops)))
-            LEFT JOIN affected_stop afs ON ((is1.id_stops = afs.fk_id_stop)))
-            LEFT JOIN incident_report e ON ((afs.fk_idevent = e.id_event)))
-        ORDER BY 
-            ir.id_rote, trs.follow_up
-    """)
+    # Verificar si el JWT está presente en los encabezados de la solicitud
+    token = request.headers.get('Authorization')
+
+    if not token:
+        return jsonify({'message': 'Token no proporcionado'}), 401
+
+    try:
+        # Decodificar el JWT
+        jwt.decode(token, SECRET_KEY, algorithms=['HS256'])
+    except jwt.ExpiredSignatureError:
+        return jsonify({'message': 'Token ha expirado'}), 401
+    except jwt.InvalidTokenError:
+        return jsonify({'message': 'Token inválido'}), 401
+
+    # Ejecutar la consulta SQL directamente
+    sql_query = text('SELECT * FROM view_full_route_stop_event_info')
 
     result = db.session.execute(sql_query)
-    all_info = []
+    routes = {}
 
     for row in result:
-        all_info.append({
-            'route_id': row.route_id,
-            'route_name': row.route_name,
-            'first_departure_time': row.first_departure_time.strftime("%H:%M:%S") if row.first_departure_time else None,
-            'last_departure_time': row.last_departure_time.strftime("%H:%M:%S") if row.last_departure_time else None,
-            'vehicle_type': row.vehicle_type,
-            'passing_frequency': row.passing_frequency,
-            'route_color': row.route_color,
-            'stop_id': row.stop_id,
-            'stop_name': row.stop_name,
-            'location_coordinates': row.location_coordinates,
-            'district': row.district,
-            'event_id': row.event_id,
-            'event_name': row.event_name,
-            'event_date': row.event_date.strftime("%Y-%m-%d") if row.event_date else None,
-            'event_start_time': row.event_start_time.strftime("%H:%M:%S") if row.event_start_time else None,
-            'event_end_time': row.event_end_time.strftime("%H:%M:%S") if row.event_end_time else None,
-            'event_status': row.event_status,
-            'follow_up': row.follow_up
-        })
+        route_id = row.route_id
 
-    return jsonify(all_info)
+        # Si la ruta aún no está en el diccionario, la añadimos
+        if route_id not in routes:
+            routes[route_id] = {
+                'ruta': {
+                    'id': route_id,
+                    'nombre': row.route_name,
+                    'primera_hora_corrida': row.first_departure_time.strftime("%H:%M:%S") if row.first_departure_time else None,
+                    'ultima_hora_corrida': row.last_departure_time.strftime("%H:%M:%S") if row.last_departure_time else None,
+                    'tipo_vehiculo': row.vehicle_type,
+                    'frecuencia_paso': row.passing_frequency,
+                    'color': row.route_color
+                },
+                'estaciones': []
+            }
+
+        # Crear la información de la estación y evento
+        estacion = {
+            'id': row.stop_id,
+            'nombre': row.stop_name,
+            'coordenadas': row.location_coordinates,
+            'distrito': row.district,
+            'evento': {
+                'id_evento': row.event_id,
+                'fecha': row.event_date.strftime("%Y-%m-%d") if row.event_date else None,
+                'nombre_evento': row.event_name,
+                'hora_inicio': row.event_start_time.strftime("%H:%M:%S") if row.event_start_time else None,
+                'hora_fin': row.event_end_time.strftime("%H:%M:%S") if row.event_end_time else None,
+                'estado': row.event_status
+            } if row.event_id else None
+        }
+
+        # Añadir la estación a la ruta correspondiente
+        routes[route_id]['estaciones'].append(estacion)
+
+    # Devolver los datos en formato JSON
+    return jsonify(list(routes.values()))
 
 
 if __name__ == '__main__':

@@ -18,7 +18,7 @@ db = SQLAlchemy(app)
 @app.route('/generate_jwt', methods=['GET'])
 def generate_jwt():
     payload = {
-        'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=30)
+        'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=1)
     }
 
     token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
